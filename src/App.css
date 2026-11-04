@@ -1,0 +1,25 @@
+.font-display { font-family: "Outfit", sans-serif; }
+.font-mono-code { font-family: "JetBrains Mono", monospace; }
+
+@keyframes rise { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+.rise { animation: rise 0.6s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+
+@keyframes pop { 0% { transform: scale(0.4); opacity: 0; } 70% { transform: scale(1.1); } 100% { transform: scale(1); opacity: 1; } }
+.pop { animation: pop 0.5s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+
+.grain::before {
+  content: ""; position: absolute; inset: 0; pointer-events: none; opacity: 0.05;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence baseFrequency='0.9'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+@keyframes pf-rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+.pf-rise { animation: pf-rise 0.5s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+@keyframes pf-fade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.pf-fade { animation: pf-fade 0.6s ease both; }
+@keyframes pf-scroll { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+.pf-track { animation: pf-scroll linear infinite; }
+.pf-marquee:hover .pf-track { animation-play-state: paused; }
+.pf-marquee { -webkit-mask-image: linear-gradient(to right, transparent, #000 6%, #000 94%, transparent); mask-image: linear-gradient(to right, transparent, #000 6%, #000 94%, transparent); }
+.pf-checker { background-color: #f8fafc; background-image: radial-gradient(#e2e8f0 1px, transparent 1px); background-size: 16px 16px; }
+.pf-checker-dark { background-color: #0b0f19; background-image: radial-gradient(#1e293b 1px, transparent 1px); background-size: 16px 16px; }
+@media (prefers-reduced-motion: reduce) { .pf-track { animation: none; } }
