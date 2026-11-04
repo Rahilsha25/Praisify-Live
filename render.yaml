@@ -15,8 +15,14 @@ services:
       - key: JWT_SECRET
         generateValue: true
       - key: FRONTEND_ORIGINS
-        sync: false
+        value: https://praisify-live-rahilsha-diwan-s-projects.vercel.app
       - key: COOKIE_SECURE
         value: "true"
       - key: COOKIE_SAME_SITE
         value: none
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: GOOGLE_REDIRECT_URI
+        value: https://praisify-live-rahilsha-diwan-s-projects.vercel.app/api/auth/google/callback
