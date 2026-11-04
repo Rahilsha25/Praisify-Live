@@ -64,6 +64,8 @@ For deployment, use a managed PostgreSQL database and set its private connection
 
 Recommended hosting for this app: Vercel for the React frontend, Render for the Express API, and Neon for managed PostgreSQL. On Neon, create a database and copy its connection string (with SSL enabled) into Render's `DATABASE_URL` secret. Set `FRONTEND_ORIGINS` to the exact deployed frontend origin, `JWT_SECRET` to a new random secret, and production cookie settings to `COOKIE_SECURE=true` and `COOKIE_SAME_SITE=none` when frontend and API are on different sites. Set `GOOGLE_REDIRECT_URI` to the deployed backend callback URL and register that exact URL with Google. Set the frontend's `REACT_APP_BACKEND_URL` to the deployed backend origin when needed. Use HTTPS for all production URLs and never commit real environment secrets.
 
+The included Render Blueprint uses the Free web-service plan to make initial testing possible without a payment method. Free web services spin down after 15 minutes without traffic and can take about a minute to start again; their local filesystem is also ephemeral. Praisify stores persistent app data in Neon, not on the service filesystem. Upgrade the API to an always-on paid plan before relying on it for a production launch.
+
 ## Tests and build
 
 - Backend tests: `Set-Location backend; npm test`

@@ -3,6 +3,7 @@ services:
     name: praisify-api
     runtime: node
     rootDir: backend
+    plan: free
     buildCommand: npm ci
     startCommand: npm start
     healthCheckPath: /api/health
