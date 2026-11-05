@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://praisify-live.vercel.app/sitemap.xml
