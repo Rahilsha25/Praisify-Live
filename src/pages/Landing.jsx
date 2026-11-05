@@ -96,7 +96,7 @@ const Hero = () => (
           <Sparkles className="h-3.5 w-3.5" /> Give customer love a place to shine
         </div>
         <h1 className="max-w-2xl font-display text-5xl font-extrabold leading-[0.99] tracking-[-0.055em] text-slate-950 sm:text-6xl lg:text-[4.5rem]">
-          Collect customer testimonials. Put your best reviews in the <span className="relative inline-block text-indigo-600">spotlight<span className="absolute -bottom-1 left-0 -z-10 h-3 w-full -rotate-2 rounded-full bg-amber-300/70" /></span>.
+          Your best reviews deserve the <span className="relative inline-block text-indigo-600">spotlight<span className="absolute -bottom-1 left-0 -z-10 h-3 w-full -rotate-2 rounded-full bg-amber-300/70" /></span>.
         </h1>
         <p className="mt-6 max-w-xl text-base leading-7 text-slate-600 sm:text-lg sm:leading-8">
           Collect thoughtful testimonials, choose the ones to publish, and turn them into a beautiful widget for your website.
