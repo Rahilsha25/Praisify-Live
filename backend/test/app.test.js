@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import request from "supertest";
+import ExcelJS from "exceljs";
 import { createApp } from "../src/app.js";
 import { createDatabase } from "../src/db.js";
 
@@ -265,6 +266,79 @@ describe("Praisify API", () => {
     await client.delete(`/api/testimonials/${testimonialId}`).expect(204);
     const emptyWidget = await request(app).get(`/api/public/widget/${profileId}`).expect(200);
     assert.equal(emptyWidget.body.testimonials.length, 0);
+  });
+
+  it("tracks labeled collection links and exports owner-scoped filtered CSV and Excel reports", async () => {
+    const account = await signUp();
+    const profileId = account.body.user.id;
+    const source = await client.post("/api/sources").send({ name: "Instagram" }).expect(201);
+    const general = (await client.get("/api/sources").expect(200)).body
+      .find((item) => item.name === "General");
+
+    await request(app).post(`/api/public/testimonials/${profileId}`)
+      .send({
+        source_id: source.body.id,
+        client_name: "Maya Chen",
+        client_role: "Founder",
+        content: "Instagram campaign review.",
+        rating: 5,
+        answers: {},
+      })
+      .expect(201);
+    await request(app).post(`/api/public/testimonials/${profileId}`)
+      .send({
+        client_name: "Sam Lee",
+        content: "General feedback.",
+        rating: 3,
+        answers: {},
+      })
+      .expect(201);
+    await db.run(`
+      INSERT INTO testimonials (
+        id, profile_id, client_name, client_role, content, rating, answers, is_approved, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, ["legacy-1", profileId, "Legacy Reviewer", "", "Imported before source tracking.", 4, "[]", 0, new Date().toISOString()]);
+
+    const listing = await client.get("/api/testimonials").expect(200);
+    assert.equal(listing.body.find((item) => item.client_name === "Maya Chen").source_name, "Instagram");
+    assert.equal(listing.body.find((item) => item.client_name === "Sam Lee").source_id, general.id);
+    assert.equal(listing.body.find((item) => item.client_name === "Legacy Reviewer").source_name, "Legacy / untagged");
+    assert.equal((await client.get("/api/sources").expect(200)).body
+      .find((item) => item.id === source.body.id).review_count, 1);
+
+    const csv = await client.get(`/api/testimonials/export?format=csv&source_id=${source.body.id}&rating=5&status=pending`)
+      .expect(200);
+    assert.match(csv.headers["content-disposition"], /praisify-feedback-.*\.csv/);
+    assert.match(csv.text, /Maya Chen/);
+    assert.doesNotMatch(csv.text, /Sam Lee/);
+
+    const allCsv = await client.get("/api/testimonials/export?format=csv&scope=all&rating=5").expect(200);
+    assert.match(allCsv.text, /Maya Chen/);
+    assert.match(allCsv.text, /Sam Lee/);
+    const legacyCsv = await client.get("/api/testimonials/export?format=csv&source_id=legacy").expect(200);
+    assert.match(legacyCsv.text, /Legacy Reviewer/);
+    assert.doesNotMatch(legacyCsv.text, /Maya Chen|Sam Lee/);
+
+    const workbookResponse = await client.get(`/api/testimonials/export?format=xlsx&source_id=${source.body.id}`)
+      .buffer(true)
+      .parse((response, callback) => {
+        const chunks = [];
+        response.on("data", (chunk) => chunks.push(chunk));
+        response.on("end", () => callback(null, Buffer.concat(chunks)));
+      })
+      .expect(200);
+    assert.match(workbookResponse.headers["content-type"], /spreadsheetml\.sheet/);
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(workbookResponse.body);
+    assert.equal(workbook.getWorksheet("Feedback").getRow(2).getCell(1).value, "Maya Chen");
+
+    await client.get(`/api/testimonials/export?format=csv&source_id=${source.body.id}`)
+      .expect(200);
+    const otherOwner = request.agent(app);
+    await signUp(otherOwner, "other@example.com").expect(201);
+    const otherCsv = await otherOwner.get("/api/testimonials/export?format=csv").expect(200);
+    assert.doesNotMatch(otherCsv.text, /Maya Chen|Sam Lee/);
+    await otherOwner.get(`/api/testimonials/export?format=csv&source_id=${source.body.id}`).expect(400);
   });
 
   it("stores form and widget settings while keeping Pro features server-gated", async () => {

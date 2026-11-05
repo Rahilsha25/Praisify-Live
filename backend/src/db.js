@@ -32,6 +32,13 @@ const SCHEMA = [
     ON testimonials(profile_id, created_at DESC)`,
   `CREATE INDEX IF NOT EXISTS testimonials_profile_approved
     ON testimonials(profile_id, is_approved)`,
+  `CREATE TABLE IF NOT EXISTS testimonial_sources (
+    id TEXT PRIMARY KEY,
+    profile_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE(profile_id, name)
+  )`,
   `CREATE TABLE IF NOT EXISTS billing_subscriptions (
     razorpay_subscription_id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -58,6 +65,11 @@ function sqliteDatabase(databasePath) {
   connection.pragma("foreign_keys = ON");
   connection.pragma("journal_mode = WAL");
   connection.exec(SCHEMA.join(";"));
+  const columns = connection.prepare("PRAGMA table_info(testimonials)").all();
+  if (!columns.some((column) => column.name === "source_id")) {
+    connection.exec("ALTER TABLE testimonials ADD COLUMN source_id TEXT");
+  }
+  connection.exec("CREATE INDEX IF NOT EXISTS testimonials_profile_source ON testimonials(profile_id, source_id)");
   return {
     async get(sql, params = []) {
       return connection.prepare(sql).get(...params);
@@ -85,6 +97,8 @@ function postgresDatabase(databaseUrl) {
   return {
     async initialize() {
       for (const statement of SCHEMA) await pool.query(statement);
+      await pool.query("ALTER TABLE testimonials ADD COLUMN IF NOT EXISTS source_id TEXT");
+      await pool.query("CREATE INDEX IF NOT EXISTS testimonials_profile_source ON testimonials(profile_id, source_id)");
     },
     async get(sql, params = []) {
       const result = await pool.query(placeholders(sql), params);

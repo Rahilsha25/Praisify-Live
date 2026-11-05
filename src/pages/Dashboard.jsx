@@ -1,17 +1,19 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { useAuthedApi } from "@/lib/api";
 import { DashboardHeader } from "@/components/dashboard/DashboardHeader";
 import { QuickActions } from "@/components/dashboard/QuickActions";
 import { TestimonialsTable } from "@/components/dashboard/TestimonialsTable";
+import { Insights } from "@/components/dashboard/Insights";
 import { FormBuilder } from "@/components/dashboard/FormBuilder";
 import { WidgetStudio } from "@/components/dashboard/WidgetStudio";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Check, MessageSquareQuote, PenLine, LayoutTemplate, Sparkles } from "lucide-react";
+import { BarChart3, Check, MessageSquareQuote, PenLine, LayoutTemplate, Sparkles } from "lucide-react";
 import { UpgradeDialog } from "@/components/billing/UpgradeDialog";
 import { ManagePlanDialog } from "@/components/billing/ManagePlanDialog";
 
 const TABS = [
+  { value: "insights", label: "Insights & Reports", icon: BarChart3 },
   { value: "testimonials", label: "Testimonials", icon: MessageSquareQuote },
   { value: "form", label: "Form Builder", icon: PenLine },
   { value: "widget", label: "Widget Studio", icon: LayoutTemplate },
@@ -21,14 +23,27 @@ export default function Dashboard() {
   const api = useAuthedApi();
   const [profile, setProfile] = useState(null);
   const [items, setItems] = useState([]);
+  const [sources, setSources] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [filters, setFilters] = useState({
+    from: "",
+    to: "",
+    rating: "all",
+    sourceId: "all",
+    status: "all",
+  });
 
   // Load the owner's profile (created on first visit) and all their testimonials.
   const load = useCallback(async () => {
     try {
-      const [me, list] = await Promise.all([api("get", "/me"), api("get", "/testimonials")]);
+      const [me, list, sourceList] = await Promise.all([
+        api("get", "/me"),
+        api("get", "/testimonials"),
+        api("get", "/sources"),
+      ]);
       setProfile(me);
       setItems(list);
+      setSources(sourceList);
     } catch {
       toast.error("Could not load your dashboard");
     } finally {
@@ -53,11 +68,31 @@ export default function Dashboard() {
   const remove = async (t) => {
     await api("delete", `/testimonials/${t.id}`);
     setItems((prev) => prev.filter((x) => x.id !== t.id));
+    if (t.source_id) {
+      setSources((prev) => prev.map((source) => source.id === t.source_id
+        ? { ...source, review_count: Math.max(0, source.review_count - 1) }
+        : source));
+    }
     toast.success("Testimonial deleted");
   };
 
   const approvedCount = items.filter((item) => item.is_approved).length;
   const pendingCount = items.length - approvedCount;
+  const filteredItems = useMemo(() => {
+    const from = filters.from ? new Date(`${filters.from}T00:00:00`).getTime() : null;
+    const to = filters.to ? new Date(`${filters.to}T23:59:59.999`).getTime() : null;
+    return items.filter((item) => {
+      const createdAt = new Date(item.created_at).getTime();
+      return (!from || createdAt >= from)
+        && (!to || createdAt <= to)
+        && (filters.rating === "all" || item.rating === Number(filters.rating))
+        && (filters.sourceId === "all"
+          || (filters.sourceId === "legacy" ? !item.source_id : item.source_id === filters.sourceId))
+        && (filters.status === "all" || item.is_approved === (filters.status === "approved"));
+    });
+  }, [filters, items]);
+  const hasFilters = Boolean(filters.from || filters.to || filters.rating !== "all"
+    || filters.sourceId !== "all" || filters.status !== "all");
 
   return (
     <div className="relative min-h-screen overflow-x-clip bg-[#fbfaf7]" data-testid="dashboard-page">
@@ -95,8 +130,8 @@ export default function Dashboard() {
             )}
           </div>
         </section>
-        {profile && <QuickActions profile={profile} />}
-        <Tabs defaultValue="testimonials" className="space-y-6">
+        {profile && <QuickActions profile={profile} sources={sources} />}
+        <Tabs defaultValue="insights" className="space-y-6">
           <TabsList className="h-auto w-full flex-wrap justify-start gap-1 rounded-2xl border border-slate-200/80 bg-white/80 p-1.5 shadow-sm sm:w-auto" data-testid="dashboard-tabs">
             {TABS.map(({ value, label, icon: Icon }) => (
               <TabsTrigger key={value} value={value} data-testid={`tab-${value}`}
@@ -105,8 +140,18 @@ export default function Dashboard() {
               </TabsTrigger>
             ))}
           </TabsList>
+          <TabsContent value="insights">
+            <Insights
+              items={filteredItems}
+              sources={sources}
+              profileId={profile?.id}
+              filters={filters}
+              setFilters={setFilters}
+              onSourceCreated={(source) => setSources((prev) => [...prev, source])}
+            />
+          </TabsContent>
           <TabsContent value="testimonials">
-            <TestimonialsTable items={items} loading={loading} onToggle={toggleApproval} onDelete={remove} tier={profile?.tier} onUpgrade={openUpgrade} />
+            <TestimonialsTable items={filteredItems} totalCount={items.length} loading={loading} onToggle={toggleApproval} onDelete={remove} tier={profile?.tier} onUpgrade={openUpgrade} hasFilters={hasFilters} />
           </TabsContent>
           <TabsContent value="form">{profile && <FormBuilder profile={profile} onSaved={setProfile} onUpgrade={openUpgrade} />}</TabsContent>
           <TabsContent value="widget">{profile && <WidgetStudio profile={profile} items={items} onSaved={setProfile} onUpgrade={openUpgrade} />}</TabsContent>

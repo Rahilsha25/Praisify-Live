@@ -31,9 +31,10 @@ const ActionCard = ({ icon: Icon, title, hint, children }) => (
   </div>
 );
 
-export const QuickActions = ({ profile }) => {
+export const QuickActions = ({ profile, sources = [] }) => {
   const origin = window.location.origin;
-  const shareUrl = `${origin}/submit/${profile.id}`;
+  const defaultSource = sources.find((source) => source.name === "General");
+  const shareUrl = `${origin}/submit/${profile.id}${defaultSource ? `?source=${defaultSource.id}` : ""}`;
   const widgetUrl = `${origin}/widget/${profile.id}`;
   const embed = embedCode(widgetUrl, profile.widget_settings.layout);
 

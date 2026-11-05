@@ -6,6 +6,7 @@ import express from "express";
 import { rateLimit } from "express-rate-limit";
 import jwt from "jsonwebtoken";
 import { z } from "zod";
+import ExcelJS from "exceljs";
 import { createUser, isUniqueConstraintError } from "./db.js";
 import {
   credentialsSchema,
@@ -87,7 +88,125 @@ function testimonialFromRow(row) {
     answers: JSON.parse(row.answers),
     is_approved: Boolean(row.is_approved),
     created_at: row.created_at,
+    ...(Object.hasOwn(row, "source_id") ? { source_id: row.source_id, source_name: row.source_name || "Legacy / untagged" } : {}),
   };
+}
+
+async function ensureDefaultSource(db, profileId) {
+  let source = await db.get("SELECT id FROM testimonial_sources WHERE profile_id = ? AND name = ?", [profileId, "General"]);
+  if (!source) {
+    const id = randomUUID();
+    await db.run(`
+      INSERT INTO testimonial_sources (id, profile_id, name, created_at)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT (profile_id, name) DO NOTHING
+    `, [id, profileId, "General", new Date().toISOString()]);
+    source = await db.get("SELECT id FROM testimonial_sources WHERE profile_id = ? AND name = ?", [profileId, "General"]);
+  }
+  return source.id;
+}
+
+function exportFilters(query) {
+  const schema = z.object({
+    scope: z.enum(["filtered", "all"]).default("filtered"),
+    from: z.string().datetime({ offset: true }).optional(),
+    to: z.string().datetime({ offset: true }).optional(),
+    rating: z.coerce.number().int().min(1).max(5).optional(),
+    source_id: z.union([z.string().uuid(), z.literal("legacy")]).optional(),
+    status: z.enum(["approved", "pending"]).optional(),
+  });
+  const result = schema.safeParse(query);
+  if (!result.success) throw httpError(400, "Invalid report filters.");
+  const filters = result.data;
+  if (filters.from && filters.to && Date.parse(filters.from) > Date.parse(filters.to)) {
+    throw httpError(400, "Start date must be on or before end date.");
+  }
+  return filters;
+}
+
+function testimonialExportQuery(profileId, filters) {
+  const conditions = ["t.profile_id = ?"];
+  const params = [profileId];
+  if (filters.scope !== "all") {
+    if (filters.from) {
+      conditions.push("t.created_at >= ?");
+      params.push(filters.from);
+    }
+    if (filters.to) {
+      conditions.push("t.created_at < ?");
+      params.push(filters.to);
+    }
+    if (filters.rating) {
+      conditions.push("t.rating = ?");
+      params.push(filters.rating);
+    }
+    if (filters.source_id === "legacy") {
+      conditions.push("t.source_id IS NULL");
+    } else if (filters.source_id) {
+      conditions.push("t.source_id = ?");
+      params.push(filters.source_id);
+    }
+    if (filters.status) {
+      conditions.push("t.is_approved = ?");
+      params.push(filters.status === "approved" ? 1 : 0);
+    }
+  }
+  return { where: conditions.join(" AND "), params };
+}
+
+const CSV_COLUMNS = [
+  ["client_name", "Customer name"],
+  ["client_role", "Role"],
+  ["rating", "Rating"],
+  ["content", "Review"],
+  ["created_at", "Submitted at"],
+  ["status", "Status"],
+  ["source_name", "Collection source"],
+  ["answers", "Additional answers"],
+];
+
+function csvCell(value) {
+  let text = String(value ?? "");
+  if (/^[\s]*[=+\-@]/.test(text)) text = `'${text}`;
+  return `"${text.replaceAll('"', '""')}"`;
+}
+
+function testimonialExportRow(row) {
+  return {
+    client_name: row.client_name,
+    client_role: row.client_role,
+    rating: row.rating,
+    content: row.content,
+    created_at: row.created_at,
+    status: row.is_approved ? "Approved" : "Pending",
+    source_name: row.source_name || "Legacy / untagged",
+    answers: JSON.stringify(JSON.parse(row.answers)),
+  };
+}
+
+async function sendTestimonialExport(res, rows, format) {
+  const values = rows.map(testimonialExportRow);
+  const date = new Date().toISOString().slice(0, 10);
+  res.set("Cache-Control", "no-store");
+  if (format === "csv") {
+    const csv = [
+      CSV_COLUMNS.map(([, label]) => csvCell(label)).join(","),
+      ...values.map((row) => CSV_COLUMNS.map(([key]) => csvCell(row[key])).join(",")),
+    ].join("\r\n");
+    res.type("text/csv; charset=utf-8");
+    res.set("Content-Disposition", `attachment; filename="praisify-feedback-${date}.csv"`);
+    return res.send(`\uFEFF${csv}`);
+  }
+  if (format !== "xlsx") throw httpError(400, "Report format must be csv or xlsx.");
+  const workbook = new ExcelJS.Workbook();
+  const sheet = workbook.addWorksheet("Feedback");
+  sheet.columns = CSV_COLUMNS.map(([key, header]) => ({ header, key, width: Math.min(60, Math.max(16, header.length + 2)) }));
+  for (const row of values) sheet.addRow(row);
+  sheet.getRow(1).font = { bold: true };
+  const buffer = await workbook.xlsx.writeBuffer();
+  res.type("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+  res.set("Content-Disposition", `attachment; filename="praisify-feedback-${date}.xlsx"`);
+  return res.send(Buffer.from(buffer));
 }
 
 function cookieOptions(config) {
@@ -487,10 +606,65 @@ export function createApp({ db, config, fetchImpl = globalThis.fetch }) {
 
   app.get("/api/testimonials", auth, async (req, res) => {
     const rows = await db.all(`
-      SELECT id, client_name, client_role, content, rating, answers, is_approved, created_at
-      FROM testimonials WHERE profile_id = ? ORDER BY created_at DESC
+      SELECT t.id, t.client_name, t.client_role, t.content, t.rating, t.answers,
+        t.is_approved, t.created_at, t.source_id, s.name AS source_name
+      FROM testimonials t
+      LEFT JOIN testimonial_sources s ON s.id = t.source_id AND s.profile_id = t.profile_id
+      WHERE t.profile_id = ? ORDER BY t.created_at DESC
     `, [req.userId]);
     res.json(rows.map(testimonialFromRow));
+  });
+
+  app.get("/api/sources", auth, async (req, res) => {
+    await ensureDefaultSource(db, req.userId);
+    const sources = await db.all(`
+      SELECT s.id, s.name, s.created_at, COUNT(t.id) AS review_count,
+        AVG(t.rating) AS average_rating
+      FROM testimonial_sources s
+      LEFT JOIN testimonials t ON t.source_id = s.id AND t.profile_id = s.profile_id
+      WHERE s.profile_id = ?
+      GROUP BY s.id, s.name, s.created_at
+      ORDER BY s.created_at ASC
+    `, [req.userId]);
+    res.json(sources.map((source) => ({
+      ...source,
+      review_count: Number(source.review_count),
+      average_rating: source.average_rating === null ? null : Number(source.average_rating),
+    })));
+  });
+
+  app.post("/api/sources", auth, async (req, res) => {
+    const { name } = parsedBody(z.object({ name: z.string().trim().min(1).max(50) }), req.body);
+    const sources = await db.all("SELECT name FROM testimonial_sources WHERE profile_id = ?", [req.userId]);
+    if (sources.length >= 30) throw httpError(400, "You can create up to 30 collection links.");
+    if (sources.some((source) => source.name.toLowerCase() === name.toLowerCase())) {
+      throw httpError(409, "A collection link with this name already exists.");
+    }
+    const source = { id: randomUUID(), name, created_at: new Date().toISOString() };
+    await db.run(`
+      INSERT INTO testimonial_sources (id, profile_id, name, created_at) VALUES (?, ?, ?, ?)
+    `, [source.id, req.userId, source.name, source.created_at]);
+    res.status(201).json({ ...source, review_count: 0, average_rating: null });
+  });
+
+  app.get("/api/testimonials/export", auth, async (req, res) => {
+    const format = req.query.format;
+    if (format !== "csv" && format !== "xlsx") throw httpError(400, "Report format must be csv or xlsx.");
+    const filters = exportFilters(req.query);
+    if (filters.source_id && filters.source_id !== "legacy") {
+      const source = await db.get("SELECT id FROM testimonial_sources WHERE id = ? AND profile_id = ?", [filters.source_id, req.userId]);
+      if (!source) throw httpError(400, "Invalid collection source.");
+    }
+    const { where, params } = testimonialExportQuery(req.userId, filters);
+    const rows = await db.all(`
+      SELECT t.client_name, t.client_role, t.content, t.rating, t.answers, t.is_approved,
+        t.created_at, s.name AS source_name
+      FROM testimonials t
+      LEFT JOIN testimonial_sources s ON s.id = t.source_id AND s.profile_id = t.profile_id
+      WHERE ${where}
+      ORDER BY t.created_at DESC
+    `, params);
+    return sendTestimonialExport(res, rows, format);
   });
 
   app.patch("/api/testimonials/:testimonialId", auth, async (req, res) => {
@@ -501,9 +675,12 @@ export function createApp({ db, config, fetchImpl = globalThis.fetch }) {
     `, [Number(data.is_approved), req.params.testimonialId, req.userId]);
     if (!result.changes) throw httpError(404, "Testimonial not found.");
     const row = await db.get(`
-      SELECT id, client_name, client_role, content, rating, answers, is_approved, created_at
-      FROM testimonials WHERE id = ?
-    `, [req.params.testimonialId]);
+      SELECT t.id, t.client_name, t.client_role, t.content, t.rating, t.answers,
+        t.is_approved, t.created_at, t.source_id, s.name AS source_name
+      FROM testimonials t
+      LEFT JOIN testimonial_sources s ON s.id = t.source_id AND s.profile_id = t.profile_id
+      WHERE t.id = ? AND t.profile_id = ?
+    `, [req.params.testimonialId, req.userId]);
     res.json(testimonialFromRow(row));
   });
 
@@ -516,6 +693,13 @@ export function createApp({ db, config, fetchImpl = globalThis.fetch }) {
   app.get("/api/public/profiles/:profileId", async (req, res) => {
     const row = await db.get("SELECT id, accepting, form_settings FROM users WHERE id = ?", [req.params.profileId]);
     if (!row) throw httpError(404, "Feedback profile not found.");
+    if (req.query.source) {
+      const source = await db.get(
+        "SELECT id FROM testimonial_sources WHERE id = ? AND profile_id = ?",
+        [req.query.source, row.id],
+      );
+      if (!source) throw httpError(404, "Collection link not found.");
+    }
     res.json({ id: row.id, accepting: Boolean(row.accepting), form: JSON.parse(row.form_settings) });
   });
 
@@ -524,6 +708,10 @@ export function createApp({ db, config, fetchImpl = globalThis.fetch }) {
     const profile = await db.get("SELECT id, accepting, tier, form_settings FROM users WHERE id = ?", [req.params.profileId]);
     if (!profile) throw httpError(404, "Feedback profile not found.");
     if (!profile.accepting) throw httpError(403, "This feedback form is not accepting responses.");
+    const sourceId = payload.source_id
+      ? (await db.get("SELECT id FROM testimonial_sources WHERE id = ? AND profile_id = ?", [payload.source_id, profile.id]))?.id
+      : await ensureDefaultSource(db, profile.id);
+    if (!sourceId) throw httpError(404, "Collection link not found.");
     const count = Number((await db.get("SELECT COUNT(*) AS count FROM testimonials WHERE profile_id = ?", [profile.id])).count);
     if (profile.tier === "free" && count >= FREE_REVIEW_LIMIT) {
       throw httpError(403, "This account has reached its review limit.");
@@ -554,11 +742,12 @@ export function createApp({ db, config, fetchImpl = globalThis.fetch }) {
       answers: JSON.stringify(answers),
       is_approved: 0,
       created_at: new Date().toISOString(),
+      source_id: sourceId,
     };
     await db.run(`
       INSERT INTO testimonials (
-        id, profile_id, client_name, client_role, content, rating, answers, is_approved, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        id, profile_id, client_name, client_role, content, rating, answers, is_approved, created_at, source_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `, [
       testimonial.id,
       testimonial.profile_id,
@@ -569,6 +758,7 @@ export function createApp({ db, config, fetchImpl = globalThis.fetch }) {
       testimonial.answers,
       testimonial.is_approved,
       testimonial.created_at,
+      testimonial.source_id,
     ]);
     res.status(201).json(testimonialFromRow(testimonial));
   });

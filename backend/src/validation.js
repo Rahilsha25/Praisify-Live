@@ -65,6 +65,7 @@ export const testimonialSchema = z.object({
   client_role: z.string().trim().max(120).optional().default(""),
   content: z.string().trim().min(1).max(2000),
   rating: z.number().int().min(1).max(5),
+  source_id: z.string().uuid().optional(),
   answers: z.record(z.string(), z.unknown()).optional().default({}),
 });
 

@@ -61,7 +61,7 @@ const Row = ({ t, onToggle, onDelete }) => (
   </TableRow>
 );
 
-export const TestimonialsTable = ({ items, loading, onToggle, onDelete, tier, onUpgrade }) => (
+export const TestimonialsTable = ({ items, totalCount = items.length, loading, onToggle, onDelete, tier, onUpgrade, hasFilters = false }) => (
   <section className="overflow-hidden rounded-3xl border border-slate-200/80 bg-white shadow-[0_20px_60px_-45px_rgba(15,23,42,0.28)]" data-testid="testimonials-table">
     <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-100 px-5 py-5 sm:px-7">
       <div className="flex items-center gap-3">
@@ -74,19 +74,19 @@ export const TestimonialsTable = ({ items, loading, onToggle, onDelete, tier, on
       {tier === "free" ? (
         <div className="flex items-center gap-3 rounded-xl bg-[#fbfaf7] px-3 py-2 text-sm">
           <span className={items.length >= FREE_REVIEW_LIMIT ? "font-semibold text-red-600" : "font-medium text-slate-600"} data-testid="testimonials-count">
-            {items.length} / {FREE_REVIEW_LIMIT} <span className="text-slate-400">reviews</span>
+            {totalCount} / {FREE_REVIEW_LIMIT} <span className="text-slate-400">reviews</span>
           </span>
           <button type="button" onClick={onUpgrade} className="inline-flex items-center gap-1 font-bold text-indigo-600 hover:text-indigo-800" data-testid="table-upgrade-link">Go unlimited <ArrowUpRight className="h-3.5 w-3.5" /></button>
         </div>
       ) : (
-        <span className="rounded-xl bg-[#fbfaf7] px-3 py-2 text-sm font-medium text-slate-600" data-testid="testimonials-count">{items.length} total</span>
+        <span className="rounded-xl bg-[#fbfaf7] px-3 py-2 text-sm font-medium text-slate-600" data-testid="testimonials-count">{totalCount} total</span>
       )}
     </div>
     {!loading && items.length === 0 ? (
       <div className="px-6 py-16 text-center" data-testid="testimonials-empty">
         <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-indigo-50 text-indigo-300"><Inbox className="h-6 w-6" /></span>
-        <p className="mt-4 font-display text-base font-bold text-slate-900">Your first review is just around the corner.</p>
-        <p className="mt-2 text-sm text-slate-500">Share your review link above to collect a testimonial.</p>
+        <p className="mt-4 font-display text-base font-bold text-slate-900">{hasFilters && totalCount ? "No feedback matches these filters." : "Your first review is just around the corner."}</p>
+        <p className="mt-2 text-sm text-slate-500">{hasFilters && totalCount ? "Adjust or clear the filters to see more results." : "Share your review link above to collect a testimonial."}</p>
       </div>
     ) : (
       <div className="overflow-x-auto">

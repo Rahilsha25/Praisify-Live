@@ -1,6 +1,6 @@
 # Praisify
 
-Praisify is a React app for collecting and displaying testimonials. The included Express backend stores app data in local SQLite during development and can use PostgreSQL in production.
+Praisify is a React app for collecting and displaying testimonials. Its dashboard includes review insights with date, rating, collection-link, and approval filters, plus CSV and Excel report downloads. Create labeled collection links to compare feedback sources. Existing reviews collected before source links were added appear as “Legacy / untagged.” The included Express backend stores app data in local SQLite during development and can use PostgreSQL in production.
 
 ## Run locally
 

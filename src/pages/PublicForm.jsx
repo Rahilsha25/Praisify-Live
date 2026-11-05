@@ -1,24 +1,26 @@
 import { useEffect, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, useSearchParams } from "react-router-dom";
 import { Loader2 } from "lucide-react";
 import { publicApi } from "@/lib/api";
 import { FeedbackForm } from "@/components/form/FeedbackForm";
 
 export default function PublicForm() {
   const { profileId } = useParams();
+  const [searchParams] = useSearchParams();
+  const sourceId = searchParams.get("source");
   const doneKey = `praisify_submitted_${profileId}`;
   const [form, setForm] = useState(null);
   const [status, setStatus] = useState("loading"); // loading | ready | missing | closed
 
   // Load the owner's custom form config (questions, theme) for this collection link.
   useEffect(() => {
-    publicApi.get(`/profiles/${profileId}`)
+    publicApi.get(`/profiles/${profileId}`, { params: sourceId ? { source: sourceId } : {} })
       .then((r) => { setForm(r.data.form); setStatus(r.data.accepting ? "ready" : "closed"); })
       .catch(() => setStatus("missing"));
-  }, [profileId]);
+  }, [profileId, sourceId]);
 
   const submit = async (payload) => {
-    await publicApi.post(`/testimonials/${profileId}`, payload);
+    await publicApi.post(`/testimonials/${profileId}`, { ...payload, ...(sourceId ? { source_id: sourceId } : {}) });
     localStorage.setItem(doneKey, "1"); // blocks duplicate submissions from this browser
   };
 
